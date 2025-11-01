@@ -898,6 +898,7 @@ if FSutils.isGuiLoaded():
             for obj in to_restore:
                 FastenersCmd.FSScrewObject(obj, obj.Type, None)
                 FastenersCmd.FSViewProviderTree(obj.ViewObject)
+                self._refresh_tree_icon(obj.ViewObject)
             doc.recompute()
             doc.commitTransaction()
             FreeCAD.Console.PrintMessage(
@@ -909,6 +910,24 @@ if FSutils.isGuiLoaded():
 
         def IsActive(self):
             return Gui.ActiveDocument is not None
+
+
+        @staticmethod
+        def _refresh_tree_icon(view_obj):
+            if view_obj is None:
+                return
+
+            refresh_icon = getattr(view_obj, "signalChangeIcon", None)
+            if callable(refresh_icon):
+                refresh_icon()
+                return
+
+            proxy = getattr(view_obj, "Proxy", None)
+            if proxy and hasattr(proxy, "onChanged"):
+                try:
+                    proxy.onChanged(view_obj, "RestoredIcon")
+                except Exception:  # pragma: no cover - best-effort refresh
+                    pass
 
 
     Gui.addCommand("Fasteners_RestoreProperties", FSRestorePropertiesCommand())
