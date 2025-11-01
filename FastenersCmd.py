@@ -698,14 +698,41 @@ def RestoreDetachedFasteners(document=None):
                         except Exception:
                             pass
 
+                    # ensure the base link is restored exactly as it was prior to detaching
+                    if base_link is not None and hasattr(obj, "BaseObject"):
+                        try:
+                            obj.BaseObject = base_link
+                        except Exception:
+                            pass
+
                     FSScrewObject(obj, fastener_type, base_link)
+
+                    proxy = getattr(obj, "Proxy", None)
+                    if proxy is not None and hasattr(proxy, "onDocumentRestored"):
+                        try:
+                            proxy.onDocumentRestored(obj)
+                        except Exception as exc:  # noqa: PERF203
+                            FreeCAD.Console.PrintError(
+                                f"Post-restore initialization failed for {obj.Name}: {exc}\n"
+                            )
+
                     obj.touch()  # ensure a recompute picks up the restored proxy
                     obj.Label = original_label
 
                     if view_provider_cls is not None and hasattr(obj, "ViewObject"):
                         view_proxy = getattr(obj.ViewObject, "Proxy", None)
                         if view_proxy is None or not isinstance(view_proxy, view_provider_cls):
-                            view_provider_cls(obj.ViewObject)
+                            view_proxy = view_provider_cls(obj.ViewObject)
+                        if view_proxy is not None and hasattr(view_proxy, "attach"):
+                            try:
+                                view_proxy.attach(obj.ViewObject)
+                            except Exception:
+                                pass
+                        if hasattr(obj.ViewObject, "update"):
+                            try:
+                                obj.ViewObject.update()
+                            except Exception:
+                                pass
 
                     restored.append(obj)
                 except Exception as exc:  # noqa: PERF203
@@ -731,6 +758,17 @@ def RestoreDetachedFasteners(document=None):
                     f"Failed to recompute document {doc.Name}: {exc}\n"
                 )
                 errors.append((None, exc))
+            else:
+                if FSutils.isGuiLoaded():
+                    try:
+                        import FreeCADGui
+
+                        FreeCADGui.updateGui()
+                    except Exception as exc:  # noqa: PERF203
+                        FreeCAD.Console.PrintError(
+                            f"Failed to refresh GUI for document {doc.Name}: {exc}\n"
+                        )
+                        errors.append((None, exc))
 
         results.append({"document": doc, "restored": restored, "errors": errors})
 
