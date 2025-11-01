@@ -698,6 +698,7 @@ def RestoreDetachedFasteners(document=None):
                             pass
 
                     FSScrewObject(obj, fastener_type, base_link)
+                    obj.touch()
                     obj.Label = original_label
 
                     if view_provider_cls is not None and hasattr(obj, "ViewObject"):
