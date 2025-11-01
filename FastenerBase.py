@@ -1028,3 +1028,52 @@ if FSutils.isGuiLoaded():
 
     Gui.addCommand("Fasteners_BOM", FSMakeBomCommand())
     FSCommands.append("Fasteners_BOM", "command")
+
+    ###################### Restore detached fasteners command #####################
+
+
+    class FSRestoreDetachedFastenersCommand:
+        """Restore fasteners that lost their python proxy."""
+
+        def GetResources(self):
+            icon = os.path.join(FSutils.iconPath, "IconRestoreFasteners.svg")
+            return {
+                "Pixmap": icon,
+                "MenuText": translate("FastenerBase", "Restore detached fasteners"),
+                "ToolTip": translate(
+                    "FastenerBase",
+                    "Scan open documents for fasteners without a proxy and restore them",
+                ),
+            }
+
+        def Activated(self):
+            import FastenersCmd
+
+            results = FastenersCmd.RestoreDetachedFasteners()
+            restored_total = sum(len(entry["restored"]) for entry in results)
+
+            if restored_total == 0:
+                FreeCAD.Console.PrintMessage(
+                    translate("FastenerBase", "No detached fasteners were found.") + "\n"
+                )
+                return
+
+            for entry in results:
+                count = len(entry["restored"])
+                if count == 0:
+                    continue
+                doc_label = getattr(entry["document"], "Label", entry["document"].Name)
+                FreeCAD.Console.PrintMessage(
+                    translate(
+                        "FastenerBase",
+                        "Restored {count} fasteners in document '{doc}'",
+                    ).format(count=count, doc=doc_label)
+                    + "\n"
+                )
+
+        def IsActive(self):
+            return len(FreeCAD.listDocuments()) > 0
+
+
+    Gui.addCommand("Fasteners_RestoreDetachedFasteners", FSRestoreDetachedFastenersCommand())
+    FSCommands.append("Fasteners_RestoreDetachedFasteners", "command")
