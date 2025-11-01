@@ -619,6 +619,167 @@ class FSScrewObject(FSBaseObject):
         # for backward compatibility: add missing attribute if needed
         self.VerifyMissingAttrs(obj)
 
+
+def _is_detached_fastener_candidate(obj):
+    if not obj.isDerivedFrom("Part::FeaturePython"):
+        return False
+
+    proxy = getattr(obj, "Proxy", None)
+    if isinstance(proxy, FSBaseObject):
+        return False
+
+    proxy_type = getattr(obj, "ProxyType", "")
+    if proxy_type and "Fasteners" not in proxy_type and "FSScrewObject" not in proxy_type:
+        return False
+
+    props = set(getattr(obj, "PropertiesList", []))
+    if "Type" not in props and "type" not in props:
+        return False
+
+    if "BaseObject" not in props and "baseObject" not in props:
+        return False
+
+    fastener_type = getattr(obj, "Type", None)
+    if fastener_type is None and hasattr(obj, "type"):
+        fastener_type = getattr(obj, "type")
+
+    if fastener_type is None:
+        return False
+
+    if FSGetTypeAlias(fastener_type) not in FSScrewCommandTable:
+        return False
+
+    return True
+
+
+def RestoreDetachedFasteners(document=None):
+    """Restore fasteners that lost their python proxy after the workbench was reinstalled."""
+
+    if document is None:
+        documents = list(FreeCAD.listDocuments().values())
+    else:
+        if hasattr(document, "Document"):
+            document = document.Document
+        documents = [document]
+
+    results = []
+
+    for doc in documents:
+        if doc is None:
+            continue
+
+        restored = []
+        errors = []
+        view_provider_cls = globals().get("FSViewProviderTree") if FSutils.isGuiLoaded() else None
+
+        doc.openTransaction("Restore detached fasteners")
+        should_recompute = False
+        try:
+            for obj in doc.Objects:
+                if not _is_detached_fastener_candidate(obj):
+                    continue
+
+                original_label = obj.Label
+                base_link = getattr(obj, "BaseObject", None)
+                try:
+                    fastener_type = getattr(obj, "Type", None)
+                    if fastener_type is None and hasattr(obj, "type"):
+                        fastener_type = getattr(obj, "type")
+                    fastener_type = FSGetTypeAlias(fastener_type)
+
+                    if hasattr(obj, "Type"):
+                        try:
+                            obj.Type = fastener_type
+                        except Exception:
+                            pass
+                    elif hasattr(obj, "type"):
+                        try:
+                            setattr(obj, "type", fastener_type)
+                        except Exception:
+                            pass
+
+                    # ensure the base link is restored exactly as it was prior to detaching
+                    if base_link is not None and hasattr(obj, "BaseObject"):
+                        try:
+                            obj.BaseObject = base_link
+                        except Exception:
+                            pass
+
+                    FSScrewObject(obj, fastener_type, base_link)
+
+                    proxy = getattr(obj, "Proxy", None)
+                    if proxy is not None and hasattr(proxy, "onDocumentRestored"):
+                        try:
+                            proxy.onDocumentRestored(obj)
+                        except Exception as exc:  # noqa: PERF203
+                            FreeCAD.Console.PrintError(
+                                f"Post-restore initialization failed for {obj.Name}: {exc}\n"
+                            )
+
+                    obj.touch()  # ensure a recompute picks up the restored proxy
+                    obj.Label = original_label
+
+                    if hasattr(obj, "ViewObject") and obj.ViewObject:
+                        if view_provider_cls is not None:
+                            view_proxy = getattr(obj.ViewObject, "Proxy", None)
+                            if view_proxy is None or not isinstance(view_proxy, view_provider_cls):
+                                view_proxy = view_provider_cls(obj.ViewObject)
+                            if view_proxy is not None and hasattr(view_proxy, "attach"):
+                                try:
+                                    view_proxy.attach(obj.ViewObject)
+                                except Exception:
+                                    pass
+                        if hasattr(obj.ViewObject, "update"):
+                            try:
+                                obj.ViewObject.update()
+                            except Exception:
+                                pass
+                        if hasattr(obj.ViewObject, "signalChangeIcon"):
+                            try:
+                                obj.ViewObject.signalChangeIcon()
+                            except Exception:
+                                pass
+
+                    restored.append(obj)
+                except Exception as exc:  # noqa: PERF203
+                    FreeCAD.Console.PrintError(
+                        f"Failed to restore fastener {obj.Name}: {exc}\n"
+                    )
+                    errors.append((obj, exc))
+
+            if restored:
+                doc.commitTransaction()
+                should_recompute = True
+            else:
+                doc.abortTransaction()
+        except Exception:  # noqa: PERF203
+            doc.abortTransaction()
+            raise
+
+        if should_recompute:
+            try:
+                doc.recompute()
+            except Exception as exc:  # noqa: PERF203
+                FreeCAD.Console.PrintError(
+                    f"Failed to recompute document {doc.Name}: {exc}\n"
+                )
+                errors.append((None, exc))
+            else:
+                if FSutils.isGuiLoaded():
+                    try:
+                        import FreeCADGui
+
+                        FreeCADGui.updateGui()
+                    except Exception as exc:  # noqa: PERF203
+                        FreeCAD.Console.PrintError(
+                            f"Failed to refresh GUI for document {doc.Name}: {exc}\n"
+                        )
+                        errors.append((None, exc))
+
+        results.append({"document": doc, "restored": restored, "errors": errors})
+
+    return results
+
     def CleanDecimals(self, val):
         val = str(val)
         if len(re.findall(r"[.]\d*$", val)) > 0:
