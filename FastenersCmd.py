@@ -1000,3 +1000,71 @@ FastenerBase.FSAddFastenerType("HexKey", False)
 FastenerBase.FSAddFastenerType("Pin")
 for item in ScrewMaker.screwTables:
     FastenerBase.FSAddItemsToType(ScrewMaker.screwTables[item][0], item)
+
+
+def RestoreDetachedFasteners(doc=None):
+    """Reattach Fasteners Workbench proxies to orphaned fasteners.
+
+    When the workbench is uninstalled, FreeCAD can no longer restore the
+    FeaturePython proxies that manage fastener behaviour, so affected objects
+    behave like plain solids after the document is saved.  Calling this helper
+    after reinstalling the workbench scans a document for such orphaned
+    fasteners and binds them back to :class:`FSScrewObject`, restoring their
+    properties, recomputation logic, and icons.
+    """
+
+    import FreeCAD
+
+    active_doc = doc or FreeCAD.ActiveDocument
+    if active_doc is None:
+        return 0
+
+    restored = 0
+    for obj in active_doc.Objects:
+        if not obj.isDerivedFrom("Part::FeaturePython"):
+            continue
+        fastener_type = getattr(obj, "Type", None)
+        if fastener_type is None or fastener_type not in FSScrewCommandTable:
+            continue
+        if isinstance(getattr(obj, "Proxy", None), FSScrewObject):
+            continue
+
+        attach = getattr(obj, "BaseObject", None)
+        try:
+            FSScrewObject(obj, fastener_type, attach)
+        except Exception as exc:  # pragma: no cover - depends on FreeCAD runtime
+            FreeCAD.Console.PrintError(
+                f"Failed to restore fastener proxy for {obj.Name}: {exc}\n"
+            )
+            continue
+
+        if FSutils.isGuiLoaded() and hasattr(obj, "ViewObject"):
+            view_proxy = getattr(obj.ViewObject, "Proxy", None)
+            if "FSViewProviderTree" in globals() and not isinstance(
+                view_proxy, FSViewProviderTree
+            ):
+                FSViewProviderTree(obj.ViewObject)
+            if hasattr(obj.ViewObject, "signalChangeIcon"):
+                try:  # pragma: no cover - GUI only
+                    obj.ViewObject.signalChangeIcon()
+                except Exception as exc:  # pragma: no cover - GUI only
+                    FreeCAD.Console.PrintLog(
+                        f"Could not refresh tree icon for {obj.Name}: {exc}\n"
+                    )
+            if hasattr(obj.ViewObject, "update"):
+                try:  # pragma: no cover - GUI only
+                    obj.ViewObject.update()
+                except Exception as exc:  # pragma: no cover - GUI only
+                    FreeCAD.Console.PrintLog(
+                        f"Could not refresh view provider for {obj.Name}: {exc}\n"
+                    )
+        if hasattr(obj.Proxy, "onDocumentRestored"):
+            obj.Proxy.onDocumentRestored(obj)
+
+        restored += 1
+
+    if restored:
+        FreeCAD.Console.PrintLog(
+            f"Restored {restored} fastener proxy{'ies' if restored != 1 else ''}.\n"
+        )
+    return restored

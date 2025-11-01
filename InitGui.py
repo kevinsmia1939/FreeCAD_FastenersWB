@@ -113,8 +113,10 @@ class FastenersWorkbench(FreeCADGui.Workbench):
     def Activated(self):
         "This function is executed when the workbench is activated"
         import FastenerBase
+        import FastenersCmd
 
         FastenerBase.InitCheckables()
+        FastenersCmd.RestoreDetachedFasteners()
         return
 
     def Deactivated(self):

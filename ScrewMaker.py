@@ -408,6 +408,7 @@ class FSScrewMaker(Screw):
     def AutoDiameter(self, type, holeObj, baseobj=None, matchOuter=False):
         """Calculate screw diameter automatically based on given hole"""
         # this function is also used to assign the default screw diameter
+        type = FSGetTypeAlias(type)
         if baseobj is not None and baseobj.Name.startswith("Washer"):
             matchOuter = True
         is_attached = (
