@@ -673,6 +673,7 @@ def RestoreDetachedFasteners(document=None):
         view_provider_cls = globals().get("FSViewProviderTree") if FSutils.isGuiLoaded() else None
 
         doc.openTransaction("Restore detached fasteners")
+        should_recompute = False
         try:
             for obj in doc.Objects:
                 if not _is_detached_fastener_candidate(obj):
@@ -698,7 +699,7 @@ def RestoreDetachedFasteners(document=None):
                             pass
 
                     FSScrewObject(obj, fastener_type, base_link)
-                    obj.touch()
+                    obj.touch()  # ensure a recompute picks up the restored proxy
                     obj.Label = original_label
 
                     if view_provider_cls is not None and hasattr(obj, "ViewObject"):
@@ -714,13 +715,22 @@ def RestoreDetachedFasteners(document=None):
                     errors.append((obj, exc))
 
             if restored:
-                doc.recompute()
                 doc.commitTransaction()
+                should_recompute = True
             else:
                 doc.abortTransaction()
         except Exception:  # noqa: PERF203
             doc.abortTransaction()
             raise
+
+        if should_recompute:
+            try:
+                doc.recompute()
+            except Exception as exc:  # noqa: PERF203
+                FreeCAD.Console.PrintError(
+                    f"Failed to recompute document {doc.Name}: {exc}\n"
+                )
+                errors.append((None, exc))
 
         results.append({"document": doc, "restored": restored, "errors": errors})
 
